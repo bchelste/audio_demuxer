@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.12)
 project(audio_transcoder)
 set(CMAKE_CXX_STANDARD 20)
 
-set(SOURCE_FILES main.cpp)
+set(SOURCE_FILES audio_demuxer.cpp audio_resampler.cpp main.cpp)
 add_executable(${PROJECT_NAME} ${SOURCE_FILES})
 
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
