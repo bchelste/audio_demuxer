@@ -30,3 +30,12 @@
 *.exe
 *.out
 *.app
+
+# Build dirs
+build
+
+# conan build utils
+cmake-build-*
+conanbuildinfo.cmake
+conanbuildinfo.txt
+conaninfo.txt
