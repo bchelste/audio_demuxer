@@ -1,0 +1,6 @@
+[requires]
+boost/1.80.0
+ffmpeg/5.0
+
+[generators]
+cmake
