@@ -50,15 +50,9 @@ private:
     int dst_rate;
     AVSampleFormat dst_sample_fmt;
 
-    uint8_t **src_data = nullptr;
-    uint8_t **dst_data = nullptr;
-    int src_linesize = 0;
-    int dst_linesize = 0;
     int src_nb_channels = 0;
     int dst_nb_channels = 0;
-
-    int output_nb_samples = 0;
-    int max_dst_nb_samples = 0;
+    int output_buffsize = 0;
 
     explicit audio_resampler_obj(int64_t input_ch_layout,
                                  int input_rate,

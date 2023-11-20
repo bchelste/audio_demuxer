@@ -58,7 +58,7 @@ public:
                       int64_t result_ch_layout);
     ~audio_demuxer_obj();
 
-    std::error_code convert(std::filesystem::path &output_file);
+    std::error_code convert(const std::filesystem::path &output_file);
 
 private:
 

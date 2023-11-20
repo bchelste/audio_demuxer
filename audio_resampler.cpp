@@ -24,14 +24,6 @@ std::unique_ptr<audio_resampler_obj> audio_resampler_obj::create_audio_resampler
 }
 
 audio_resampler_obj::~audio_resampler_obj() {
-    if (src_data != nullptr) {
-        av_freep(&src_data[0]);
-        av_freep(&src_data);
-    }
-    if (dst_data != nullptr) {
-        av_freep(&dst_data[0]);
-        av_freep(&dst_data);
-    }
     if (swr_ctx != nullptr){
         swr_free(&swr_ctx);
     }
@@ -46,17 +38,10 @@ audio_resampler_obj::audio_resampler_obj(audio_resampler_obj &&other) noexcept :
         dst_sample_fmt(other.dst_sample_fmt),
         src_nb_channels(other.src_nb_channels),
         dst_nb_channels(other.dst_nb_channels),
-        output_nb_samples(other.output_nb_samples),
-        max_dst_nb_samples(other.max_dst_nb_samples) {
+        output_buffsize(other.output_buffsize) {
 
     swr_ctx = other.swr_ctx;
     other.swr_ctx = nullptr;
-
-    src_data = other.src_data;
-    other.src_data = nullptr;
-
-    dst_data = other.dst_data;
-    other.dst_data = nullptr;
 }
 
 audio_resampler_obj &audio_resampler_obj::operator=(audio_resampler_obj &&other) noexcept {
@@ -78,34 +63,31 @@ audio_resampler_obj &audio_resampler_obj::operator=(audio_resampler_obj &&other)
     dst_rate = other.dst_rate;
     dst_sample_fmt = other.dst_sample_fmt;
 
-    if (src_data != nullptr) {
-        av_freep(&src_data[0]);
-        av_freep(&src_data);
-    }
-    src_data = other.src_data;
-    other.src_data = nullptr;
-
-    if (dst_data != nullptr) {
-        av_freep(&dst_data[0]);
-        av_freep(&dst_data);
-    }
-    dst_data = other.dst_data;
-    other.dst_data = nullptr;
-
-    src_linesize = other.src_linesize;
-    dst_linesize = other.dst_linesize;
-
     src_nb_channels = other.src_nb_channels;
     dst_nb_channels = other.dst_nb_channels;
-
-    output_nb_samples = other.output_nb_samples;
-    max_dst_nb_samples = other.max_dst_nb_samples;
+    output_buffsize = other.output_buffsize;
 
     return *this;
 }
 
+const auto samples_deleter = [](uint8_t*** sample) {
+    if (sample != nullptr) {
+        av_freep(sample[0]);
+    }
+    av_freep(sample);
+};
+
+using samples_arr = std::unique_ptr<u_int8_t** [], decltype(samples_deleter)>;
+
 audio_resampler_err audio_resampler_obj::convert(AVFrame *frame, std::vector<std::vector<uint8_t> > &data_storage) {
 
+    uint8_t **src_data = nullptr;
+    uint8_t **dst_data = nullptr;
+    int src_linesize = 0;
+    int dst_linesize = 0;
+    int output_nb_samples = 0;
+
+    // src buffer
     auto result = av_samples_alloc_array_and_samples(&src_data,
                                                      &src_linesize,
                                                      src_nb_channels,
@@ -115,17 +97,22 @@ audio_resampler_err audio_resampler_obj::convert(AVFrame *frame, std::vector<std
     if (result < 0) {
         return audio_resampler_err::ALLOC_SRC_SAMPLES_ERR;
     }
+    samples_arr src(&src_data);
 
+    /* compute the number of converted samples: buffering is avoided
+     * ensuring that the output buffer will contain at least all the
+     * converted input samples */
     auto tmp_nb_samples = av_rescale_rnd(frame->nb_samples,
                                          dst_rate,
                                          src_rate,
                                          AV_ROUND_UP);
     if ((tmp_nb_samples < INT_MAX) && (tmp_nb_samples > INT_MIN)) {
-        max_dst_nb_samples = output_nb_samples = static_cast<int>(tmp_nb_samples);
+        output_nb_samples = static_cast<int>(tmp_nb_samples);
     } else {
         return audio_resampler_err::OUTPUT_NB_SAMPLES_ERR;
     }
 
+    // dst buffer
     result = av_samples_alloc_array_and_samples(&dst_data,
                                                 &dst_linesize,
                                                 dst_nb_channels,
@@ -135,35 +122,9 @@ audio_resampler_err audio_resampler_obj::convert(AVFrame *frame, std::vector<std
     if (result < 0) {
         return audio_resampler_err::ALLOC_DST_SAMPLES_ERR;
     }
+    samples_arr dst(&dst_data);
 
-    tmp_nb_samples = av_rescale_rnd(
-            swr_get_delay(swr_ctx, frame->sample_rate) + frame->nb_samples,
-            dst_rate,
-            frame->sample_rate,
-            AV_ROUND_UP);
-
-    if ((tmp_nb_samples < INT_MAX) && (tmp_nb_samples > INT_MIN)) {
-        output_nb_samples = static_cast<int>(tmp_nb_samples);
-    } else {
-        return audio_resampler_err::OUTPUT_NB_SAMPLES_ERR;
-    }
-
-    if (output_nb_samples > max_dst_nb_samples) {
-        av_freep(&dst_data[0]);
-
-        result = av_samples_alloc(dst_data,
-                                  &dst_linesize,
-                                  dst_nb_channels,
-                                  output_nb_samples,
-                                  dst_sample_fmt,
-                                  1);
-        if (result < 0) {
-            return audio_resampler_err::ALLOC_DST_SAMPLES_ERR;
-        }
-
-        max_dst_nb_samples = output_nb_samples;
-    }
-
+    // convert to destination format
     auto st_line_size = static_cast<size_t>(src_linesize);
     for (int i = 0; i < src_nb_channels; ++i) {
         memcpy(src_data[i], frame->extended_data[i], st_line_size);
@@ -178,6 +139,7 @@ audio_resampler_err audio_resampler_obj::convert(AVFrame *frame, std::vector<std
         return audio_resampler_err::CONVERTING_ERR;
     }
 
+    // store result data to storage
     auto dst_bufsize = av_samples_get_buffer_size(&dst_linesize,
                                                   dst_nb_channels,
                                                   current_samples_amount,
@@ -186,6 +148,7 @@ audio_resampler_err audio_resampler_obj::convert(AVFrame *frame, std::vector<std
     if (dst_bufsize < 0) {
         return audio_resampler_err::DST_SAMPLE_BUF_SIZE_ERR;
     }
+    output_buffsize = dst_bufsize;
 
     for (int i = 0; i < dst_nb_channels; ++i) {
         data_storage.emplace_back(dst_data[i], dst_data[i] + dst_bufsize);
@@ -195,7 +158,7 @@ audio_resampler_err audio_resampler_obj::convert(AVFrame *frame, std::vector<std
 }
 
 int audio_resampler_obj::get_output_buf_size() const {
-    return dst_linesize;
+    return output_buffsize;
 }
 
 // private methods
@@ -217,11 +180,14 @@ audio_resampler_obj::audio_resampler_obj(int64_t input_ch_layout,
 }
 
 audio_resampler_err audio_resampler_obj::init_audio_resampler() {
+
+    // create resampler context
     swr_ctx = swr_alloc();
     if (swr_ctx == nullptr) {
         return audio_resampler_err::ALLOC_RESAMPLER_CTX_ERR;
     }
 
+    // set options
     av_opt_set_int(swr_ctx, "in_channel_layout",src_ch_layout, 0);
     av_opt_set_int(swr_ctx, "in_sample_rate", src_rate, 0);
     av_opt_set_sample_fmt(swr_ctx, "in_sample_fmt", src_sample_fmt, 0);
@@ -230,10 +196,12 @@ audio_resampler_err audio_resampler_obj::init_audio_resampler() {
     av_opt_set_int(swr_ctx, "out_sample_rate", dst_rate, 0);
     av_opt_set_sample_fmt(swr_ctx, "out_sample_fmt", dst_sample_fmt, 0);
 
+    //initialize the resampling context
     if ((swr_init(swr_ctx)) < 0) {
         return audio_resampler_err::INIT_SWR_CTX_ERR;
     }
 
+    // set numbers of channels
     src_nb_channels = av_get_channel_layout_nb_channels(static_cast<std::uint64_t>(src_ch_layout));
     dst_nb_channels = av_get_channel_layout_nb_channels(static_cast<std::uint64_t>(dst_ch_layout));
 

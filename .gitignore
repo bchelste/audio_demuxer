@@ -39,3 +39,5 @@ cmake-build-*
 conanbuildinfo.cmake
 conanbuildinfo.txt
 conaninfo.txt
+
+.idea
