@@ -78,7 +78,7 @@ audio_demuxer_obj::~audio_demuxer_obj() {
     clean_up_resources();
 }
 
-std::error_code audio_demuxer_obj::convert(std::filesystem::path &output_file) {
+std::error_code audio_demuxer_obj::convert(const std::filesystem::path &output_file) {
     auto result = get_input_file_info();
     if (result != audio_demuxer_errc::SUCCESS) {
         return result;
