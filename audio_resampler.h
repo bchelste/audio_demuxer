@@ -1,5 +1,6 @@
 #include <memory>
 #include <vector>
+#include <cstdint>
 
 extern "C" {
 #include <libswresample/swresample.h>

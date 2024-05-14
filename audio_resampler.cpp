@@ -30,15 +30,15 @@ audio_resampler_obj::~audio_resampler_obj() {
 }
 
 audio_resampler_obj::audio_resampler_obj(audio_resampler_obj &&other) noexcept :
-        src_ch_layout(other.src_ch_layout),
-        src_rate(other.src_rate),
-        src_sample_fmt(other.src_sample_fmt),
-        dst_ch_layout(other.src_ch_layout),
-        dst_rate(other.dst_rate),
-        dst_sample_fmt(other.dst_sample_fmt),
-        src_nb_channels(other.src_nb_channels),
-        dst_nb_channels(other.dst_nb_channels),
-        output_buffsize(other.output_buffsize) {
+    src_ch_layout(other.src_ch_layout),
+    src_rate(other.src_rate),
+    src_sample_fmt(other.src_sample_fmt),
+    dst_ch_layout(other.src_ch_layout),
+    dst_rate(other.dst_rate),
+    dst_sample_fmt(other.dst_sample_fmt),
+    src_nb_channels(other.src_nb_channels),
+    dst_nb_channels(other.dst_nb_channels),
+    output_buffsize(other.output_buffsize) {
 
     swr_ctx = other.swr_ctx;
     other.swr_ctx = nullptr;
@@ -133,7 +133,7 @@ audio_resampler_err audio_resampler_obj::convert(AVFrame *frame, std::vector<std
     auto current_samples_amount = swr_convert(swr_ctx,
                                               dst_data,
                                               output_nb_samples,
-                                              (const uint8_t **)src_data,
+                                              const_cast<const uint8_t **>(src_data),
                                               frame->nb_samples);
     if (current_samples_amount < 0) {
         return audio_resampler_err::CONVERTING_ERR;
